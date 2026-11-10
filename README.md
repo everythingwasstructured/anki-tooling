@@ -40,6 +40,7 @@ python3 tooling/build_deck.py --cards cards.json --media media --out DECK.apkg -
 | `coverage.py` | Every line id is on a card (`"covers"`), or skipped with a K / L / N / IO reason in `scope.json`. A card with no slide line needs `"stressed_quote"`. Writes `coverage.md` with the table and the heading check. |
 | `build_deck.py` | Hygiene, cloze syntax, 60% rule, media, duplicates, slide order, card lints, coverage, note-type changes against `--prev`. Sets each note's `due` to its position in `cards.json`, so Anki shows new cards in that order. Prints the Anki delete search for removed UIDs. |
 | `recrop.py` | The same figures from the same spec, every time. |
+| `io_masks.py`, `io_deck.py` | Occlusion masks from label ink, with checks; native Anki image-occlusion notes merged into the deck. |
 | `make_bundle.py` | The audit zip, with the fixed brief (`AUDIT-BRIEF.md`) and the author's private fields stripped. |
 
 ## cards.json
@@ -65,7 +66,19 @@ Blocking lints: `leak`, `set`, `list`, `binary`, `hedge`, `long`, `order`. Warni
 The CSS, the two templates and the model ids in `build_deck.py`. Anki treats any change as a
 new note type and orphans every card already imported.
 
-## Image occlusion
+## Image occlusion (only where labelling is examined)
 
-The `io_*.py` scripts from `cvsanat1` are not in this repo yet. Until they are, the recipe is
-in the project doc `claude/decks/cvsanat1-turn2.md`.
+```
+pip install scipy numpy --break-system-packages -q
+python3 tooling/io_masks.py LECTURE.pptx --init > io_spec.json      # candidates; then prune the spec
+python3 tooling/io_masks.py LECTURE.pptx io_spec.json io --lines ex/lines.json
+#   look at io/_overlay.png once; fix the spec until CHECKS is empty
+python3 tooling/build_deck.py ... --io io --scope scope.json,io/io_scope.json
+```
+
+`io_masks.py` derives each mask from the label's ink (normal render minus label-blanked render),
+cuts the picture from a render with the body text removed, and checks for label ink outside a
+mask, overlapping masks and visible text that names a mask. `io_deck.py` holds the
+"Image Occlusion (slides)" note type (id 1730406118) and is imported by `build_deck.py --io`.
+Checked against `cvsanat1`: the 19 label-box notes come out with the same 106 masks and the
+same boxes as the audited deck.

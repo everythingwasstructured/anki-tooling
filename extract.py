@@ -40,6 +40,7 @@ SYMBOL = {0x61: "α", 0x62: "β", 0x67: "γ", 0x64: "δ", 0x65: "ε", 0x6B: "κ"
           0xAE: "→", 0xAC: "←", 0xAB: "↔", 0xDE: "⇒", 0xB3: "≥", 0xA3: "≤", 0xB1: "±", 0xB4: "×",
           0xB0: "°", 0xBB: "≈", 0xB9: "≠", 0xB5: "∝", 0xA5: "∞", 0xB7: "•", 0xD7: "⋅", 0xA2: "′"}
 hazards = []
+cropped = set()
 
 def fix_pua(text, xml, where):
     """Map private-use characters. Symbol font -> real character; anything else -> marker."""
@@ -170,7 +171,7 @@ def walk(slide, shapes, slide_no, counter, depth=0):
                 cs = ""
                 if any(crop):
                     cs = f" CROPPED l,t,r,b={crop}"
-                    hazards.append(f"{where}: picture cropped in PowerPoint {crop} - use the render, not the file")
+                    cropped.add(slide_no)
                 W(f"{ind}<IMAGE {name} file={fn} {pos}{cs}>")
                 manifest.append({"slide": slide_no, "file": fn, "bytes": len(blob), "crop": crop})
             except Exception:
@@ -201,6 +202,9 @@ for idx, slide in enumerate(prs.slides, start=1):
     if chars < 50:
         W(f"  ***FLAG: only {chars} chars of text - picture-only or scanned slide; open the render***")
 
+if cropped:
+    hazards.append("pictures cropped inside PowerPoint on slides " + ", ".join(map(str, sorted(cropped)))
+                   + " - the files in img/ show more than the slide did; figures come from renders")
 W(f"\n\n{'=' * 90}\nHAZARDS ({len(hazards)})")
 for h in hazards: W("  " + h)
 total = sum(per_slide.values())

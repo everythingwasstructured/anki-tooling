@@ -28,6 +28,7 @@ ap.add_argument("--allow-type-change", action="store_true", help="only when Kai 
 ap.add_argument("--lines", help="lines.json from extract.py: turns on the slide-text coverage gate")
 ap.add_argument("--scope", help="scope.json: skipped slides/lines with their K/L/N/IO reasons")
 ap.add_argument("--coverage-md", default="coverage.md")
+ap.add_argument("--io", help="IO_DIR from io_masks.py: adds its image-occlusion notes to this deck")
 ap.add_argument("--check", action="store_true", help="run the gates only; build nothing")
 a = ap.parse_args()
 CARDS, MEDIA_DIR, OUT = a.cards, a.media, a.out
@@ -129,7 +130,11 @@ def lint(c, code, msg, block=True):
     elif block: errors.append(f"{c.get('uid')}: [{code}] {msg}")
     else: warnings.append(f"{c.get('uid')}: [{code}] {msg}")
 seen_uid, seen_first = set(), {}
-used_media, available = set(), set(os.listdir(MEDIA_DIR))
+io_notes = []
+if a.io:                                   # image-occlusion notes: pictures are copied into MEDIA_DIR first
+    import io_deck
+    io_notes = io_deck.notes(a.io, MEDIA_DIR)
+used_media, available = {fn for _, _, fn in io_notes}, set(os.listdir(MEDIA_DIR))
 ALLOWED = r"/?(?:b|i|u|em|strong|br|mark|sub|sup|div|span)\b"
 
 for c in cards:
@@ -264,7 +269,7 @@ else:
     warnings.append("[coverage] NOT RUN - pass --lines lines.json --scope scope.json. Do not call this deck complete.")
 
 print("=" * 72)
-print(f"PRE-FLIGHT | {len(cards)} notes | {len(used_media)} media")
+print(f"PRE-FLIGHT | {len(cards)} text notes | {len(io_notes)} image-occlusion notes | {len(used_media)} media")
 print("=" * 72)
 for w in warnings: print("  warn ", w)
 for o in overrides: print("  allow", o)
@@ -280,6 +285,7 @@ if a.check: raise SystemExit(0)
 
 deck = genanki.Deck(ids["deck_id"], doc["deck"])
 nb = nc = 0
+last_due = {}
 for pos, c in enumerate(cards):
     img = f'<img src="{c["image"]}">' if c.get("image") else ""
     if c["type"] == "basic":
@@ -288,12 +294,18 @@ for pos, c in enumerate(cards):
     else:
         f = [c["text"], c.get("extra",""), img, c.get("image_caption",""), c.get("mnemonic",""),
              c["source"], c["uid"]]; m = cloze_model; nc += 1
-    deck.add_note(genanki.Note(model=m, fields=list(f), guid=genanki.guid_for(c["uid"]), tags=[], due=pos))  # due = position in cards.json, so Anki shows new cards in this order
+    deck.add_note(genanki.Note(model=m, fields=list(f), guid=genanki.guid_for(c["uid"]), tags=[], due=(pos + 1) * 1000))  # due follows cards.json, so Anki shows new cards in this order
+    sm = re.search(r"slides?\s+(\d+)", c.get("source", ""))
+    if sm and not c.get("order"): last_due[int(sm.group(1))] = (pos + 1) * 1000
+for i, (slide, note, _) in enumerate(sorted(io_notes, key=lambda t: t[0])):   # an occlusion note follows its slide's text cards
+    note.due = max([d for s_, d in last_due.items() if s_ <= slide], default=0) + 1 + i
+    deck.add_note(note)
 pkg = genanki.Package(deck)
 pkg.media_files = sorted(os.path.join(MEDIA_DIR, x) for x in used_media)
 pkg.write_to_file(OUT)
 lens = sorted(len(plain(c.get("text") or c["front"] + " " + c["back"])) for c in cards)
-print(f"\nBuilt {OUT}\n  Basic Rich {nb} | Cloze Rich {nc} | media {len(used_media)}")
+print(f"\nBuilt {OUT}\n  Basic Rich {nb} | Cloze Rich {nc} | Image Occlusion {len(io_notes)} notes, "
+      f"{sum(n.fields[0].count('::image-occlusion') for _, n, _ in io_notes)} masks | media {len(used_media)}")
 print(f"  deck_id: {deck_id}  ({'NEW - add to registry.md' if created else 'existing'})")
 import statistics
 print(f"  median {statistics.median(lens):g} chars (plain text), max {lens[-1]} | notes with an image: {sum(1 for c in cards if c.get('image'))}")

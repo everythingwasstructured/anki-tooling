@@ -49,7 +49,12 @@ def check(lines_path, cards_path, scope_path):
     data = json.load(open(lines_path, encoding="utf-8"))
     lines = data["lines"]
     cards = plan_cards(cards_path) if cards_path.endswith(".md") else json.load(open(cards_path, encoding="utf-8"))["cards"]
-    scope = json.load(open(scope_path, encoding="utf-8")) if scope_path else {}
+    scope = {}
+    for sp in (scope_path or "").split(","):             # e.g. scope.json,io/io_scope.json
+        if sp.strip():
+            for key, val in json.load(open(sp.strip(), encoding="utf-8")).items():
+                if isinstance(val, dict): scope.setdefault(key, {}).update(val)
+                else: scope.setdefault(key, []).extend(val)
     skip_slides = {int(k): v for k, v in scope.get("skip_slides", {}).items()}
     skip_lines = scope.get("skip_lines", {})
     titles = set(scope.get("titles", []))
