@@ -41,6 +41,8 @@ python3 tooling/build_deck.py --cards cards.json --media media --out DECK.apkg -
 | `build_deck.py` | Hygiene, cloze syntax, 60% rule, media, duplicates, slide order, card lints, coverage, note-type changes against `--prev`. Sets each note's `due` to its position in `cards.json`, so Anki shows new cards in that order. Prints the Anki delete search for removed UIDs. |
 | `recrop.py` | The same figures from the same spec, every time. |
 | `io_masks.py`, `io_deck.py` | Occlusion masks from label ink, with checks; native Anki image-occlusion notes merged into the deck. |
+| `unpack_deck.py` | Any `.apkg` of a deck (turn 2's, or Kai's own Anki export) back into `cards.json`, edits and line ids included. |
+| `anki_feedback.py` | A report from Kai's Anki export: rhythm, each deck, each card design, what he suspended and edited, the costliest cards. |
 | `make_bundle.py` | The audit zip, with the fixed brief (`AUDIT-BRIEF.md`) and the author's private fields stripped. |
 
 ## cards.json
@@ -58,8 +60,8 @@ python3 tooling/build_deck.py --cards cards.json --media media --out DECK.apkg -
 Optional per-card keys: `"stressed_quote"` (off-slide card: the lecturer's words), `"order"`
 (why the card sits out of slide order, e.g. `"is-before-does"`), `"lint_ok": {"code": "reason"}`.
 
-Blocking lints: `leak`, `set`, `list`, `binary`, `hedge`, `long`, `order`. Warnings to read:
-`echo`, `dup-answer`, `c2`, `article`, `two-q`.
+Blocking lints: `leak`, `set`, `list`, `group` (more than two items hidden on one card), `binary`,
+`hedge`, `long`, `order`. Warnings to read: `echo`, `dup-answer`, `long-answer`, `article`, `two-q`.
 
 ## Never change
 

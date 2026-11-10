@@ -43,8 +43,10 @@ verdict from the cards and the sources. If a card looks wrong, report it.
 2. **Off-slide content** (speaker notes, transcript) is a card only where the lecturer marks
    it as important or examinable in his own words. Otherwise it is context in `Extra`, marked
    as spoken or from the notes, or it is absent. Examples he mentions in passing are absent.
-3. **One fact, one card** within this deck. A set is carded once: one grouping cloze, or one
-   card per member, never both. A contrast is one discrimination card.
+3. **One fact, one card** within this deck. A list of three or more is one cloze note that
+   states the list's size and hides its members two at a time (`c1`, `c2`, ...), or one card
+   per member, never both. No card hides more than two items. A contrast is one
+   discrimination card.
 4. **A card about one member of a set names that member.** "One advantage of X is ___" is a
    defect: any member fills the blank. A split set shows the members it is not testing.
 5. **Content, not label.** The blank is the meaning, mechanism, value or consequence, not the
@@ -52,13 +54,17 @@ verdict from the cards and the sources. If a card looks wrong, report it.
    properties, not the two names.
 6. **No card gives itself away**: not from its own visible words, a cliché, grammar, a
    50% guess, or common sense without the lecture.
-7. Clozes are bare (no hints), determinate from the stem, and each deletion index hides at
-   most 60% of the sentence. Median card about 120 characters of plain text.
+7. Clozes are bare (no hints, no bracketed cues) and each card hides at most 60% of its
+   sentence. If the sentence alone does not say what kind of answer is wanted (where, why,
+   which, how many), the card should be a Basic question. Cards are short: median about 120
+   characters of plain text, no preamble.
 8. **Each card carries its slide's heading context** and can be understood without the slide.
 9. Cards run in slide order. Where a deck has a card for what something *is* and one for
    what it *does*, the "is" card comes first.
 10. Figures are on the back, and each one shows what its card tests.
-11. Only what the source supports. Where sources conflict, the card follows the slide and
+11. Only what the source supports. One allowed exception: a line in `Extra` labelled
+    *Definition (not from the lecture)* that explains a technical word. Do not report those.
+    Otherwise: Where sources conflict, the card follows the slide and
     `Extra` says so plainly. A description is never turned into a definition.
 
 ## What to check

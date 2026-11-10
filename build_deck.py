@@ -219,6 +219,8 @@ for c in cards:
     for k, ans in answers:
         a_, vis = norm(ans), visible(c, k)
         if a_ in ("yes", "no", "true", "false"): lint(c, "binary", f"answer {a_!r} is a 50% guess")
+        if len(a_) > 80: lint(c, "long-answer", f"answer is {len(a_)} characters - long answers cost about twice the review time; "
+                                               f"hide the key phrase and leave the rest visible, or split the fact", block=False)
         if 4 <= len(a_) <= 80 and re.search(r"(?<![a-z])" + re.escape(a_) + r"(?![a-z])", vis):
             lint(c, "leak", f"answer {a_!r} is visible elsewhere on the card")
         else:
@@ -232,8 +234,11 @@ for c in cards:
         if len(re.split(r"<br\s*/?>", b)) >= 3 or "<li" in b: lint(c, "list", "list on the back - use a grouping cloze or per-member cards")
         if c.get("front", "").count("?") > 1: lint(c, "two-q", "more than one question on the front", block=False)
     else:
-        if max((s["index"] for s in cloze_spans(c["text"])), default=1) > 1:
-            lint(c, "c2", "uses c2+ - only for independent facts; set members hide together under c1", block=False)
+        per_index = defaultdict(int)
+        for s_ in cloze_spans(c["text"]): per_index[s_["index"]] += 1
+        big = {k: v for k, v in per_index.items() if v > 2}
+        if big: lint(c, "group", f"c{min(big)} hides {big[min(big)]} items at once - at most 2 per card; pair a list's members under c1, c2, ... "
+                                 f"so each card hides two and shows the rest")
         if re.search(r"\b(?:a|an)\s+(?:<[^>]+>)*\{\{c\d+::", c["text"], re.I):
             lint(c, "article", "a/an directly before a deletion can leak the answer", block=False)
     if HEDGE.search(strip_html(c.get("extra", ""))): lint(c, "hedge", "Extra voices doubt about the card - resolve it or ask Kai; do not ship the doubt")
@@ -283,6 +288,10 @@ if errors:
 print("  no blocking errors" + (f" | {len(warnings)} warning(s) to read" if warnings else ""))
 if a.check: raise SystemExit(0)
 
+META_KEYS = ("covers", "order", "lint_ok", "stressed_quote")
+def source_field(c):
+    meta = {k: c[k] for k in META_KEYS if c.get(k)}
+    return c["source"] + (" \u2016 " + json.dumps(meta, ensure_ascii=False).replace("<", "\\u003c") if meta else "")
 deck = genanki.Deck(ids["deck_id"], doc["deck"])
 nb = nc = 0
 last_due = {}
@@ -290,10 +299,10 @@ for pos, c in enumerate(cards):
     img = f'<img src="{c["image"]}">' if c.get("image") else ""
     if c["type"] == "basic":
         f = [c["front"], c["back"], img, c.get("image_caption",""), c.get("mnemonic",""),
-             c.get("extra",""), c["source"], c["uid"]]; m = basic_model; nb += 1
+             c.get("extra",""), source_field(c), c["uid"]]; m = basic_model; nb += 1
     else:
         f = [c["text"], c.get("extra",""), img, c.get("image_caption",""), c.get("mnemonic",""),
-             c["source"], c["uid"]]; m = cloze_model; nc += 1
+             source_field(c), c["uid"]]; m = cloze_model; nc += 1
     deck.add_note(genanki.Note(model=m, fields=list(f), guid=genanki.guid_for(c["uid"]), tags=[], due=(pos + 1) * 1000))  # due follows cards.json, so Anki shows new cards in this order
     sm = re.search(r"slides?\s+(\d+)", c.get("source", ""))
     if sm and not c.get("order"): last_due[int(sm.group(1))] = (pos + 1) * 1000
