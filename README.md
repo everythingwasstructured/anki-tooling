@@ -43,6 +43,7 @@ python3 tooling/build_deck.py --cards cards.json --media media --out DECK.apkg -
 | `io_masks.py`, `io_deck.py` | Occlusion masks from label ink, with checks; native Anki image-occlusion notes merged into the deck. |
 | `unpack_deck.py` | Any `.apkg` of a deck (turn 2's, or Kai's own Anki export) back into `cards.json`, edits and line ids included. |
 | `anki_feedback.py` | A report from Kai's Anki export: rhythm, each deck, each card design, what he suspended and edited, the costliest cards. |
+| `plan_sheet.py` | A one-page read-first outline of the lecture, rendered from `plan.md` in slide order. No writing, no cost. |
 | `make_bundle.py` | The audit zip, with the fixed brief (`AUDIT-BRIEF.md`) and the author's private fields stripped. |
 
 ## cards.json
