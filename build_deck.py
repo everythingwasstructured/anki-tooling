@@ -1,5 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Package cards.json into an .apkg. Packaging only - no authoring decisions here."""
+"""Package cards.json into an .apkg. Packaging only - no authoring decisions here.
+
+new lecture : build_deck.py --cards cards.json --media media --out X.apkg --registry registry.md --lines lines.json --scope scope.json
+rebuild     : build_deck.py --cards cards.json --media media --out X.apkg --deck-id N --prev old-cards.json --lines lines.json --scope scope.json
+check only  : add --check (runs every gate, builds nothing)
+
+Gates, all blocking: text hygiene, cloze syntax, 60% rule, hints, media, duplicates,
+slide order, card lints, slide-text coverage (coverage.py), and note-type changes
+against --prev. A blocking lint is overridden per card, never globally:
+    "lint_ok": {"long": "ordered walkthrough - order is the fact"}
+    "order":   "is-before-does"        (a card deliberately placed ahead of its slide)
+Fix the card, never the threshold. NEVER edit the CSS, templates or model ids below.
+"""
 import os, json, re, random
 from collections import defaultdict
 import genanki
@@ -11,6 +23,12 @@ ap.add_argument("--media", required=True)
 ap.add_argument("--out", required=True)
 ap.add_argument("--deck-id", type=int)
 ap.add_argument("--registry")
+ap.add_argument("--prev", help="the previous cards.json of this deck: prints the Anki delete search and blocks note-type changes")
+ap.add_argument("--allow-type-change", action="store_true", help="only when Kai has confirmed the deck is NOT yet imported")
+ap.add_argument("--lines", help="lines.json from extract.py: turns on the slide-text coverage gate")
+ap.add_argument("--scope", help="scope.json: skipped slides/lines with their K/L/N/IO reasons")
+ap.add_argument("--coverage-md", default="coverage.md")
+ap.add_argument("--check", action="store_true", help="run the gates only; build nothing")
 a = ap.parse_args()
 CARDS, MEDIA_DIR, OUT = a.cards, a.media, a.out
 
@@ -103,7 +121,13 @@ def plain(t):
     return strip_html(t)
 def norm(s): return re.sub(r"\s+", " ", strip_html(s)).strip().lower().rstrip(".")
 
-errors, warnings = [], []
+errors, warnings, overrides = [], [], []
+def lint(c, code, msg, block=True):
+    """A card-quality finding. Blocking unless the card carries lint_ok[code] with a reason."""
+    ok = (c.get("lint_ok") or {}).get(code)
+    if ok: overrides.append(f"{c.get('uid')}: {code} allowed - {ok}")
+    elif block: errors.append(f"{c.get('uid')}: [{code}] {msg}")
+    else: warnings.append(f"{c.get('uid')}: [{code}] {msg}")
 seen_uid, seen_first = set(), {}
 used_media, available = set(), set(os.listdir(MEDIA_DIR))
 ALLOWED = r"/?(?:b|i|u|em|strong|br|mark|sub|sup|div|span)\b"
@@ -146,7 +170,7 @@ for c in cards:
         if img not in available: errors.append(f"{uid}: missing media {img}")
         used_media.add(img)
     if len(plain(c.get("text") or c.get("front","") + " " + c.get("back",""))) > 210:
-        warnings.append(f"{uid}: over 210 chars")
+        lint(c, "long", "over 210 chars - two facts? (an ordered walkthrough needs lint_ok)")
 
 for o in sorted(available - used_media): errors.append(f"unused media: {o}")
 
@@ -164,18 +188,99 @@ for c in cards:
         hits = [(m, basic_terms[m]) for m in members if m in basic_terms]
         if hits: errors.append(f"{c['uid']}: grouping-cloze members also carded alone: {hits}")
 
+# --- card lints: the recall-target and set defects audits kept finding by hand ---
+STOP = set("""the a an of and or to in on by for with from is are was were be as at it its that this
+which into than then their there these those not no but can may also each such via per between through
+during within without where when while because called known named found mainly usually""".split())
+SET_WORDS = r"(?:advantage|disadvantage|reason|feature|cause|factor|way|role|function|type|example|challenge|benefit)s?"
+UNCUED = re.compile(r"\b(?:one|another|a further|also|partly)\b[^.?!]{0,40}?\b" + SET_WORDS + r"\b", re.I)
+HEDGE = re.compile(r"check before trusting|appeared to say|not sure|may be wrong|might be wrong|unverified|i think\b|\bguess", re.I)
+def visible(c, k=None):
+    """What the learner sees before answering: Basic front, or the cloze with index k blanked."""
+    if c["type"] == "basic": return norm(c.get("front", ""))
+    t = c["text"]
+    for s in cloze_spans(t):
+        raw = "{{c%d::%s}}" % (s["index"], s["inner"])
+        t = t.replace(raw, " ___ " if s["index"] == k else s["inner"], 1)
+    return norm(t)
+def words(s): return {w for w in re.findall(r"[a-z][a-z\-]{5,}", norm(s)) if w not in STOP}
+cloze_answers = defaultdict(set)
+prev_slide = 0
+for c in cards:
+    uid = c.get("uid")
+    answers = []                                         # (index, answer)
+    if c["type"] == "basic": answers = [(None, c.get("back", ""))]
+    else: answers = [(s["index"], s["inner"]) for s in cloze_spans(c.get("text", ""))]
+    for k, ans in answers:
+        a_, vis = norm(ans), visible(c, k)
+        if a_ in ("yes", "no", "true", "false"): lint(c, "binary", f"answer {a_!r} is a 50% guess")
+        if 4 <= len(a_) <= 80 and re.search(r"(?<![a-z])" + re.escape(a_) + r"(?![a-z])", vis):
+            lint(c, "leak", f"answer {a_!r} is visible elsewhere on the card")
+        else:
+            echo = sorted(words(ans) & words(vis))
+            if echo: lint(c, "echo", f"answer shares {echo} with the visible text - cover the answer and re-read", block=False)
+        if c["type"] == "cloze" and len(a_) >= 4: cloze_answers[a_].add(uid)
+    vis_all = norm(c.get("front", "")) if c["type"] == "basic" else norm(plain(c.get("text", "")))
+    if UNCUED.search(vis_all): lint(c, "set", "uncued set member ('one/another/also ... X') - name the member or regroup the set")
+    if c["type"] == "basic":
+        b = c.get("back", "")
+        if len(re.split(r"<br\s*/?>", b)) >= 3 or "<li" in b: lint(c, "list", "list on the back - use a grouping cloze or per-member cards")
+        if c.get("front", "").count("?") > 1: lint(c, "two-q", "more than one question on the front", block=False)
+    else:
+        if max((s["index"] for s in cloze_spans(c["text"])), default=1) > 1:
+            lint(c, "c2", "uses c2+ - only for independent facts; set members hide together under c1", block=False)
+        if re.search(r"\b(?:a|an)\s+(?:<[^>]+>)*\{\{c\d+::", c["text"], re.I):
+            lint(c, "article", "a/an directly before a deletion can leak the answer", block=False)
+    if HEDGE.search(strip_html(c.get("extra", ""))): lint(c, "hedge", "Extra voices doubt about the card - resolve it or ask Kai; do not ship the doubt")
+    m = re.search(r"slides?\s+(\d+)", c.get("source", ""))
+    if m and not c.get("order"):
+        n = int(m.group(1))
+        if n < prev_slide: errors.append(f"{uid}: [order] slide {n} after slide {prev_slide} - cards follow slide order "
+                                         f"(set \"order\": \"is-before-does\" or \"overview\" if deliberate)")
+        prev_slide = max(prev_slide, n)
+    elif c.get("order"): overrides.append(f"{uid}: order - {c['order']}")
+for a_, uids in sorted(cloze_answers.items()):
+    if len(uids) > 1: warnings.append(f"[dup-answer] {a_!r} is hidden on {sorted(uids)} - same fact twice?")
+
+# --- rebuild diff: what Kai must delete in Anki, and note-type changes that would not import ---
+removed, retyped = [], []
+if a.prev:
+    old = {c["uid"]: c for c in json.load(open(a.prev, encoding="utf-8"))["cards"]}
+    new = {c["uid"]: c for c in cards}
+    removed = sorted(set(old) - set(new))
+    retyped = sorted(u for u in set(old) & set(new) if old[u]["type"] != new[u]["type"])
+    if retyped and not a.allow_type_change:
+        errors.append(f"note type changed for {retyped}: Anki will not update these on import. Keep the type "
+                      f"(question-form cloze), or give a new UID; --allow-type-change only if the deck is not imported")
+
+# --- slide-text coverage gate (PART 00) ---
+cov_stats = None
+if a.lines:
+    import coverage
+    rows, cdefects, cov_stats, clines, _ = coverage.check(a.lines, CARDS, a.scope)
+    coverage.write_md(a.coverage_md, rows, cdefects, cov_stats, clines, cards)
+    errors += [f"[coverage] {d}" for d in cdefects]
+else:
+    warnings.append("[coverage] NOT RUN - pass --lines lines.json --scope scope.json. Do not call this deck complete.")
+
 print("=" * 72)
 print(f"PRE-FLIGHT | {len(cards)} notes | {len(used_media)} media")
 print("=" * 72)
 for w in warnings: print("  warn ", w)
+for o in overrides: print("  allow", o)
+if cov_stats: print("  coverage:", ", ".join(f"{k} {v}" for k, v in sorted(cov_stats.items())), f"-> {a.coverage_md}")
+if a.prev:
+    print(f"  vs --prev: {len(removed)} removed, {len(retyped)} retyped")
+    if removed: print("  DELETE IN ANKI (if the previous build was imported):\n    " + " OR ".join("UID:" + u for u in removed))
 if errors:
     for e in errors: print("  ERROR", e)
     raise SystemExit(f"\nBLOCKED: {len(errors)} error(s). Nothing built.")
-print("  no blocking errors")
+print("  no blocking errors" + (f" | {len(warnings)} warning(s) to read" if warnings else ""))
+if a.check: raise SystemExit(0)
 
 deck = genanki.Deck(ids["deck_id"], doc["deck"])
 nb = nc = 0
-for c in cards:
+for pos, c in enumerate(cards):
     img = f'<img src="{c["image"]}">' if c.get("image") else ""
     if c["type"] == "basic":
         f = [c["front"], c["back"], img, c.get("image_caption",""), c.get("mnemonic",""),
@@ -183,11 +288,12 @@ for c in cards:
     else:
         f = [c["text"], c.get("extra",""), img, c.get("image_caption",""), c.get("mnemonic",""),
              c["source"], c["uid"]]; m = cloze_model; nc += 1
-    deck.add_note(genanki.Note(model=m, fields=list(f), guid=genanki.guid_for(c["uid"]), tags=[]))
+    deck.add_note(genanki.Note(model=m, fields=list(f), guid=genanki.guid_for(c["uid"]), tags=[], due=pos))  # due = position in cards.json, so Anki shows new cards in this order
 pkg = genanki.Package(deck)
 pkg.media_files = sorted(os.path.join(MEDIA_DIR, x) for x in used_media)
 pkg.write_to_file(OUT)
 lens = sorted(len(plain(c.get("text") or c["front"] + " " + c["back"])) for c in cards)
 print(f"\nBuilt {OUT}\n  Basic Rich {nb} | Cloze Rich {nc} | media {len(used_media)}")
 print(f"  deck_id: {deck_id}  ({'NEW - add to registry.md' if created else 'existing'})")
-print(f"  median {lens[len(lens)//2]} chars, max {lens[-1]}")
+import statistics
+print(f"  median {statistics.median(lens):g} chars (plain text), max {lens[-1]} | notes with an image: {sum(1 for c in cards if c.get('image'))}")
