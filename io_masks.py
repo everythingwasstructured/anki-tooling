@@ -27,6 +27,13 @@ io_spec.json
     "blank_text" ["SVC = superior vena cava"]   visible text to remove because it answers a mask
     "crop_in"  [l, t, r, b]   slide inches; default is the pictures plus the masks
     "also_hide" [{"with": "Right ventricle", "box_in": [l,t,r,b]}]   printed text hidden with that mask
+    "shown"    {"12": "io-s39"}   a label left VISIBLE here because note io-s39 already tests it in a
+               similar view. Move a label from "labels" to "shown" to stop testing it twice.
+  REPEATS. The same label often appears on several images. Test it once per distinct view:
+  mask it again only where the orientation or format differs (anterior vs posterior, internal vs
+  surface, diagram vs scan), or where the same words name a different structure (the anterior
+  cusp of the tricuspid vs the mitral valve). --init marks repeats, and step 2 lists every label
+  still masked on more than one note. Kai sees that list and decides.
   Labels printed INSIDE a picture have no text box. Add them by hand as their own note:
     "54b": {"slide": 54, "header": "...", "crop_in": [...], "dpi": 300,
             "manual": [{"text": "A (aortic valve site)", "box_in": [l,t,r,b]}], "blank_in": [[l,t,r,b]]}
@@ -78,12 +85,14 @@ def candidates(slide):
 
 # ---------------------------------------------------------------- step 1: --init
 if len(sys.argv) == 3 and sys.argv[2] == "--init":
-    prs = Presentation(sys.argv[1]); out = {}
+    prs = Presentation(sys.argv[1]); out = {}; seen = {}
     for i, s in enumerate(prs.slides, 1):
         pics, labs, ctx = candidates(s)
         if pics and labs:
             title = next((text_of(sh) for sh in s.shapes if sh.is_placeholder and "TITLE" in str(sh.placeholder_format.type)), "")
-            out[str(i)] = {"header": title or f"Slide {i}", "labels": labs, "context": ctx}
+            reps = {k: "also a label on slide " + ", ".join(seen[t.lower()]) + " - same view? then move it to \"shown\"" for k, t in labs.items() if t.lower() in seen}
+            for t in labs.values(): seen.setdefault(t.lower(), []).append(str(i))
+            out[str(i)] = {"header": title or f"Slide {i}", "labels": labs, "shown": {}, "repeats": reps, "context": ctx}
     json.dump({"slug": "SLUG", "dpi": 150, "slides": out}, sys.stdout, ensure_ascii=False, indent=1)
     sys.exit(0)
 
@@ -260,9 +269,16 @@ json.dump({"slug": SLUG, "notes": geom}, open(os.path.join(OUT, "io_geom.json"),
 if LINES:                                                # which line ids these notes carry, for scope.json
     lines = json.load(open(LINES, encoding="utf-8"))["lines"]; prs0 = Presentation(PPTX); sc = {}
     for k, v in auto.items():
-        names = {sh.name for sh, _ in walk(prs0.slides[int(k) - 1].shapes) if str(sh.shape_id) in v.get("labels", {})}
+        owner = {}                                       # (shape name, paragraph text) -> shape id; names alone are not unique
+        for sh, _ in walk(prs0.slides[int(k) - 1].shapes):
+            if sh.has_text_frame:
+                for p in sh.text_frame.paragraphs:
+                    owner.setdefault((sh.name, " ".join(p.text.split())), str(sh.shape_id))
         for l in lines:
-            if l["slide"] == int(k) and l["kind"] != "notes" and l["shape"] in names: sc[l["id"]] = f"IO io-s{k}"
+            sid = owner.get((l["shape"], l["text"]))
+            if l["slide"] != int(k) or l["kind"] == "notes" or sid is None: continue
+            if sid in v.get("labels", {}): sc[l["id"]] = f"IO io-s{k}"
+            elif sid in v.get("shown", {}): sc[l["id"]] = f"IO {v['shown'][sid]} (tested there; shown as context on io-s{k})"
     json.dump({"skip_lines": sc}, open(os.path.join(OUT, "io_scope.json"), "w"), indent=0)
     print(f"  io_scope.json: {len(sc)} line ids carried by image occlusion (pass it to --scope after scope.json, comma-separated)")
 cols = 3; rows_ = (len(sheets) + cols - 1) // cols
@@ -271,4 +287,12 @@ for i, s in enumerate(sheets): sheet.paste(s, ((i % cols) * 770 + 5, (i // cols)
 sheet.save(os.path.join(OUT, "_overlay.png"))
 total = sum(len(g["boxes"]) for g in geom.values())
 print(f"{len(geom)} notes, {total} masks -> {OUT}   (look at _overlay.png once)")
+where = {}
+for k, g in geom.items():
+    for b in g["boxes"]:
+        if not b.get("group"): where.setdefault(" ".join(b["text"].lower().split()), []).append(f"io-s{k}")
+reps = {t: v for t, v in where.items() if len(set(v)) > 1}
+print(f"REPEATS ({len(reps)} labels masked on more than one note, {sum(len(set(v)) - 1 for v in reps.values())} extra cards) - "
+      f"keep a repeat only where the view differs or the words name a different structure; otherwise move it to \"shown\"")
+for t, v in sorted(reps.items(), key=lambda x: -len(x[1])): print(f"  {t}: {', '.join(dict.fromkeys(v))}")
 print(f"CHECKS ({len(checks)})"); [print("  " + c_) for c_ in checks]
